@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Psychology Experiment</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .container {
+            max-width: 800px;
+        }
+        .card {
+            background-color: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .btn {
+            transition: background-color 0.2s, transform 0.2s;
+        }
+        .btn:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 flex items-center justify-center min-h-screen">
+
+    <div id="experiment-container" class="container mx-auto p-4 md:p-8">
+
+        <!-- Start Screen -->
+        <div id="start-screen" class="text-center">
+            <h1 class="text-4xl md:text-5xl font-bold mb-4 text-blue-600">Cognitive Response Task</h1>
+            <p class="text-lg md:text-xl text-gray-600 mb-8">You will be presented with a series of questions. Please select the correct answer as quickly and accurately as possible.</p>
+            <p class="text-sm text-gray-500 mb-8">Your responses and the time it takes you to answer will be recorded for research purposes.</p>
+            <button id="start-btn" class="btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-xl shadow-lg">Start Experiment</button>
+        </div>
+
+        <!-- Question Screen -->
+        <div id="question-screen" class="hidden">
+            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-xl border border-gray-200">
+                <div class="mb-6 text-center">
+                    <p class="text-sm font-semibold text-blue-500">Question <span id="question-number"></span> of <span id="total-questions"></span></p>
+                    <h2 id="question-text" class="text-2xl md:text-3xl font-bold mt-2"></h2>
+                </div>
+                <div id="options-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Options will be dynamically inserted here -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Loading Spinner -->
+        <div id="loading-spinner" class="hidden text-center">
+            <svg class="animate-spin h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="mt-4 text-lg text-gray-600">Saving results...</p>
+        </div>
+
+        <!-- End Screen -->
+        <div id="end-screen" class="hidden text-center">
+            <h1 class="text-4xl md:text-5xl font-bold mb-4 text-green-600">Experiment Complete!</h1>
+            <p class="text-lg md:text-xl text-gray-700">Thank you for your participation.</p>
+        </div>
+
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        // Import Firebase modules.
+        // It's crucial to use the '11.6.1' version or a compatible one.
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // --- EXPERIMENT CONFIGURATION ---
+        const questions = [
+            { id: "q1", text: "Which animal is a mammal?", options: ["Shark", "Eagle", "Dolphin", "Snake"], correctAnswer: "Dolphin" },
+            { id: "q2", text: "What is the capital of France?", options: ["Berlin", "Madrid", "Paris", "Rome"], correctAnswer: "Paris" },
+            { id: "q3", text: "Which planet is known as the Red Planet?", options: ["Mars", "Venus", "Jupiter", "Saturn"], correctAnswer: "Mars" },
+            { id: "q4", text: "What is 2 + 2 * 2?", options: ["8", "6", "4", "10"], correctAnswer: "6"},
+        ];
+        // --- END OF CONFIGURATION ---
+
+
+        // DOM Elements
+        const startScreen = document.getElementById('start-screen');
+        const questionScreen = document.getElementById('question-screen');
+        const endScreen = document.getElementById('end-screen');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const startBtn = document.getElementById('start-btn');
+        const questionText = document.getElementById('question-text');
+        const optionsContainer = document.getElementById('options-container');
+        const questionNumberEl = document.getElementById('question-number');
+        const totalQuestionsEl = document.getElementById('total-questions');
+
+
+        // Experiment State
+        let currentQuestionIndex = 0;
+        let participantResults = [];
+        let startTime;
+        let db; // Firestore database instance
+        let auth; // Firebase auth instance
+        
+        // IMPORTANT: These are placeholders provided by the collaborative environment.
+        // When you deploy this on your own, you will need to replace them
+        // with your own Firebase project configuration.
+        // To get your config: Go to your Firebase project -> Project Settings -> General -> Your apps -> SDK setup and configuration
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+        
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-experiment-app';
+
+        // --- FIREBASE INITIALIZATION ---
+        async function initializeFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('debug'); // Use 'debug' for detailed logs, 'silent' for production
+
+                // Sign in the user. In a real experiment, this gives a unique ID to each participant.
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        console.log("Participant signed in with UID:", user.uid);
+                    } else {
+                        console.log("Participant signed out.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                alert("Could not connect to the database. Please refresh the page.");
+            }
+        }
+
+
+        // --- EXPERIMENT LOGIC ---
+        function startExperiment() {
+            startScreen.classList.add('hidden');
+            questionScreen.classList.remove('hidden');
+            totalQuestionsEl.textContent = questions.length;
+            displayQuestion();
+        }
+
+        function displayQuestion() {
+            if (currentQuestionIndex >= questions.length) {
+                endExperiment();
+                return;
+            }
+
+            const currentQuestion = questions[currentQuestionIndex];
+            questionNumberEl.textContent = currentQuestionIndex + 1;
+            questionText.textContent = currentQuestion.text;
+            optionsContainer.innerHTML = ''; // Clear previous options
+
+            currentQuestion.options.forEach(option => {
+                const button = document.createElement('button');
+                button.textContent = option;
+                button.classList.add('btn', 'w-full', 'p-4', 'md:p-6', 'text-lg', 'md:text-xl', 'font-semibold', 'rounded-lg', 'bg-gray-100', 'hover:bg-blue-100', 'border-2', 'border-gray-200', 'hover:border-blue-300');
+                button.onclick = () => handleAnswer(option);
+                optionsContainer.appendChild(button);
+            });
+            
+            // Start the timer
+            startTime = performance.now();
+        }
+
+        function handleAnswer(selectedOption) {
+            const endTime = performance.now();
+            const duration = Math.round(endTime - startTime);
+
+            const currentQuestion = questions[currentQuestionIndex];
+            participantResults.push({
+                participantId: auth.currentUser ? auth.currentUser.uid : 'anonymous',
+                questionId: currentQuestion.id,
+                questionText: currentQuestion.text,
+                selectedAnswer: selectedOption,
+                isCorrect: selectedOption === currentQuestion.correctAnswer,
+                responseTimeMs: duration,
+                timestamp: new Date().toISOString()
+            });
+
+            currentQuestionIndex++;
+            displayQuestion();
+        }
+
+        async function endExperiment() {
+            questionScreen.classList.add('hidden');
+            loadingSpinner.classList.remove('hidden');
+
+            console.log("Final results:", participantResults);
+
+            try {
+                // Save each result as a separate document in Firestore
+                for (const result of participantResults) {
+                     // The collection path MUST follow the specified structure for security rules to work.
+                    const collectionPath = `/artifacts/${appId}/public/data/results`;
+                    const docRef = await addDoc(collection(db, collectionPath), result);
+                    console.log("Document written with ID: ", docRef.id);
+                }
+
+                loadingSpinner.classList.add('hidden');
+                endScreen.classList.remove('hidden');
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                loadingSpinner.classList.add('hidden');
+                alert("There was an error saving your results. Please try again.");
+                // Optionally, re-enable the start screen or show a retry button
+                startScreen.classList.remove('hidden');
+            }
+        }
+
+        // --- EVENT LISTENERS ---
+        startBtn.addEventListener('click', startExperiment);
+        
+        // Initialize Firebase when the script loads
+        initializeFirebase();
+
+    </script>
+
+</body>
+</html>
